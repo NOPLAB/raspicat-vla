@@ -1,0 +1,22 @@
+# Build / colcon
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Generated proto stubs are committed (they are vendored), but local debug files aren't
+*.pb.cc
+*.pb.h
+
+# Editor
+.vscode/
+.idea/
+
+# OS
+.DS_Store
