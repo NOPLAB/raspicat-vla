@@ -1,0 +1,4 @@
+raspicat_async_vla_msgs/GoalSpec goal
+---
+bool success
+string message

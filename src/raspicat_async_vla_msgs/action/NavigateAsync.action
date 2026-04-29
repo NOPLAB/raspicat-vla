@@ -1,0 +1,13 @@
+raspicat_async_vla_msgs/GoalSpec goal
+float32 timeout_sec
+float32 goal_tolerance_m
+---
+bool success
+string message
+float32 final_distance_m
+---
+float32 distance_remaining_m
+geometry_msgs/PoseStamped current_pose
+nav_msgs/Path predicted_path
+uint32 remote_inferences_completed
+float32 last_round_trip_ms
