@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>raspicat_async_vla_remote</name>
+  <version>0.1.0</version>
+  <description>gRPC server for AsyncVLA (dummy in Plan 1, real model in Plan 2).</description>
+  <maintainer email="nop@example.com">nop</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <exec_depend>raspicat_async_vla_proto</exec_depend>
+
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

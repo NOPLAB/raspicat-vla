@@ -1,0 +1,10 @@
+server:
+  host: 0.0.0.0
+  port: 50051
+  max_concurrent_streams: 4
+
+dummy:
+  num_tokens: 8
+  embed_dim: 1024
+  inference_ms: 50.0      # simulated latency added before reply
+  model_version: "dummy-v1"
