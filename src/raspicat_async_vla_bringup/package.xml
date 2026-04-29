@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>raspicat_async_vla_bringup</name>
+  <version>0.1.0</version>
+  <description>Launch composition for AsyncVLA on raspicat.</description>
+  <maintainer email="nop@example.com">nop</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <exec_depend>raspicat_async_vla_edge</exec_depend>
+  <exec_depend>raspicat_async_vla_remote</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

@@ -1,0 +1,7 @@
+# Topic remappings for sim vs real raspicat (filled in Plan 2 sim_full.launch.py).
+sim:
+  image: "/camera/image_raw"
+  cmd_vel: "/cmd_vel"
+real:
+  image: "/raspicat/camera/image_raw"
+  cmd_vel: "/cmd_vel"
