@@ -2,13 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace Plan 1's `DummyServer` (or, alternatively, run alongside it and Plan 2A's AsyncVLA backend) with an `OmniVLAServer` that loads OmniVLA's `vla + pose_projector + action_head` on the GPU side, and an `OmniVLA_edge` adapter on the edge side, so real images and goals flow end-to-end through the OmniVLA-edge pipeline (`external/OmniVLA/inference/run_omnivla_edge.py`) and the edge node emits a real predicted Path.
+**Goal:** Replace Plan 1's `DummyServer` (or, alternatively, run alongside it and Plan 2A's AsyncVLA backend) with an `OmniVLABackend` that loads OmniVLA-original's `vla + pose_projector + action_head` on the GPU side, runs the full forward pass, and serializes the predicted action chunk as the `ActionEmbedding` payload. The edge runs a thin `OmniVLAEdgeAdapter` that converts those waypoints into a `nav_msgs/Path` via `delta_to_pose` accumulation — **no learned model on the edge**.
 
-**Architecture:** Reuses the gRPC bidi-stream wiring and the model-agnostic packages produced by the `refactor: rename packages to model-agnostic raspicat_vla_*` commit. The Remote-side server picks a backend (`dummy` / `asyncvla` / `omnivla`) at startup; the Edge-side picks a matching adapter (`stub` / `asyncvla` / `omnivla`) via parameters. The gRPC contract (`raspicat_vla.v1.VLAService`) and the `nav_msgs/Path` topic do not change.
+**Architecture:** Path 1 from `docs/superpowers/notes/2026-04-30-omnivla-deps.md`. Reuses the gRPC bidi-stream wiring and the model-agnostic packages produced by the `refactor: rename packages to model-agnostic raspicat_vla_*` commit. The Remote-side server picks a backend (`dummy` / `asyncvla` / `omnivla`) at startup; the Edge-side picks a matching adapter (`stub` / `asyncvla` / `omnivla`) via parameters. The gRPC contract (`raspicat_vla.v1.VLAService`) and the `nav_msgs/Path` topic do not change. The cloud→edge payload carries the predicted action chunk reshaped as `(num_tokens=NUM_ACTIONS_CHUNK, embed_dim=ACTION_DIM)` (typically (8, 4)).
 
-**Why OmniVLA-edge (not OmniVLA-original):** OmniVLA ships in two flavors — `run_omnivla.py` (monolithic, full pipeline on GPU; outputs control directly) and `run_omnivla_edge.py` (cloud + edge split with `OmniVLA_edge` from `inference/model_omnivla_edge.py`). Only the edge variant maps cleanly onto our `Observation → ActionEmbedding → Path` pipeline. OmniVLA-original could be added later via a separate "all-on-remote" launch that publishes `nav_msgs/Path` directly and bypasses the edge adapter; that is **out of scope** for this plan.
+**Why Path 1 (OmniVLA-original cloud + math-only edge), not Path 2 (OmniVLA-edge fully on edge):** OmniVLA ships in two non-overlapping flavours; neither is a clean cloud→embedding→edge split. The Task 0 deps report (`docs/superpowers/notes/2026-04-30-omnivla-deps.md`) lays this out. Path 1 keeps the AsyncVLA-style cloud-heavy / edge-light topology, leaves the gRPC contract untouched, requires no learned model on the raspicat, and uses the canonical `NHirose/omnivla-original` weights. Path 2 (running `OmniVLA_edge` from `model_omnivla_edge.py` on the device, requiring CLIP + 6-frame ring buffer + zero-fill map_images) is a possible **follow-up plan** once raspicat compute headroom is confirmed sufficient. Path 3 (synthesizing a custom split inside the upstream `OmniVLA_edge` model) is rejected.
 
-**Tech Stack:** PyTorch 2.2 + CUDA bf16 + transformers + prismatic (vendored at `external/OmniVLA`) + huggingface_hub for `NHirose/omnivla-original` (cloud backbone) and `NHirose/omnivla-edge` (edge head). The edge-adapter dependencies (`efficientnet_pytorch`, `torchvision`) are shared with Plan 2A. ROS2 Humble unchanged.
+**Tech Stack:** PyTorch 2.2 + CUDA bf16 + transformers + prismatic (vendored at `external/OmniVLA`) + huggingface_hub for `NHirose/omnivla-original` (cloud backbone). `omnivla-edge.pth` is **not** downloaded for Plan 2B v1; it would be added back if/when Path 2 ships. ROS2 Humble unchanged.
 
 **Reference spec:** `docs/superpowers/specs/2026-04-29-asyncvla-control-node-design.md` §6 (Edge), §7 (Remote) — OmniVLA's contract is identical at the proto layer; only the backend differs.
 **Companion plan:** `docs/superpowers/plans/2026-04-29-asyncvla-real-model-integration.md` (Plan 2A, AsyncVLA). Plan 2A and Plan 2B can land in either order; whichever lands first introduces the multi-backend abstraction (Task 3 below). The other plan then plugs into it.
@@ -83,15 +83,26 @@ class EdgeAdapter(ABC):
 
 ### D3. Constraints on goal modalities for v1
 
-OmniVLA-edge's full input set includes `obs_images`, `goal_pose`, `map_images`, `goal_image`, `modality_id`, `feat_text_lan`, `cur_large_img`. The current proto (`raspicat_vla.v1.Observation`) carries only the first JPEG, the `GoalSpec` (POSE/TEXT/IMAGE), and `current_pose`. **Plan 2B v1 supports POSE-goal and TEXT-goal modalities only.** `map_images`, `satellite`, and `cur_large_img` are stubbed (set to a blank tensor of the right shape) and flagged in `ModelInfo.metadata`. Adding satellite / map / large-image support is a follow-up plan that extends the proto.
+OmniVLA-original (`run_omnivla.py`) accepts language and pose goals natively. The current proto (`raspicat_vla.v1.Observation`) carries one image, a `GoalSpec` (POSE/TEXT/IMAGE), and `current_pose`. **Plan 2B v1 supports POSE-goal and TEXT-goal modalities.** `IMAGE`-goal is best-effort (passed through to the cloud backbone if supported by `omnivla-original`'s processor; otherwise yields a `WAITING_REMOTE` and a logged warning). Satellite / map / large-image multi-modal inputs are out of scope.
 
 ### D4. Checkpoints
 
-OmniVLA ships separate HF repos:
-- `NHirose/omnivla-original` — cloud backbone (`vla`, `pose_projector`, `action_head` checkpoints at step 120000).
-- `NHirose/omnivla-edge` — edge model checkpoint(s).
+OmniVLA Plan 2B v1 uses one HF repo:
+- `NHirose/omnivla-original` — cloud backbone (`vla` shards + `action_head--120000_checkpoint.pt` + `proprio_projector--120000_checkpoint.pt`; `dist_head--120000_checkpoint.pt` is shipped but unused in v1).
 
-Plan 2B uses `omnivla-original` for the remote and `omnivla-edge` for the edge. Both are downloaded by `scripts/download_omnivla_checkpoints.sh` (Task 2).
+Downloaded by `scripts/download_omnivla_checkpoints.sh` (Task 2). The `pose_projector` filename quirk (file is on disk as `proprio_projector--*_checkpoint.pt` but referenced as `pose_projector` in code) is handled by the existing checkpoint helper (Task 4 / Plan 2A). `omnivla-edge.pth` is **not** downloaded for v1 (would only be needed if a future Path-2 plan ships).
+
+### D5. ActionEmbedding payload contract
+
+The cloud→edge payload for OmniVLA carries the un-projected action chunk:
+
+| Field           | Plan 1 (dummy) | Plan 2A (AsyncVLA) | **Plan 2B (OmniVLA, this plan)**     |
+| --------------- | -------------- | ------------------ | ------------------------------------ |
+| `num_tokens`    | 8              | NUM_ACTIONS_CHUNK × ACTION_DIM (= 32) | **NUM_ACTIONS_CHUNK (= 8)** |
+| `embed_dim`     | 1024           | 1024 (post action_proj)               | **ACTION_DIM (= 4)** — (x, y, cos, sin) |
+| `embedding_fp16`| fp16 of zeros  | fp16 of projected_actions             | **fp16 of action_pred (cumsum waypoints)** |
+
+The edge OmniVLA adapter therefore receives the predicted trajectory directly and only needs to (a) un-cumsum if necessary, (b) build a `nav_msgs/Path` from the (x, y, cos, sin) tuples. **There is no learned model on the edge.**
 
 ---
 
@@ -106,7 +117,7 @@ raspicat-vla/
 ├── scripts/
 │   ├── gen_proto.sh                  # Plan 1
 │   ├── download_checkpoints.sh       # Plan 2A (NHirose/AsyncVLA_release)
-│   └── download_omnivla_checkpoints.sh  # NEW (Plan 2B): NHirose/omnivla-original + omnivla-edge
+│   └── download_omnivla_checkpoints.sh  # NEW (Plan 2B): NHirose/omnivla-original
 ├── external/
 │   ├── AsyncVLA/                     # Plan 2A submodule
 │   ├── OmniVLA/                      # already submodule'd
@@ -139,14 +150,12 @@ raspicat-vla/
 │   │   │       ├── base.py               # NEW: EdgeAdapter ABC
 │   │   │       ├── stub.py               # NEW: port of _stub_adapter_to_path
 │   │   │       ├── asyncvla.py           # Plan 2A
-│   │   │       ├── omnivla.py            # NEW: OmniVLAAdapter (load + predict_path)
-│   │   │       └── omnivla_inference.py  # NEW: forward + waypoints_to_path
+│   │   │       └── omnivla.py            # NEW: OmniVLAEdgeAdapter (pure math, no learned model)
 │   │   ├── config/
-│   │   │   └── edge_params.yaml          # MODIFIED: + adapter_kind, + omnivla_edge_path / step / device
+│   │   │   └── edge_params.yaml          # MODIFIED: + adapter_kind
 │   │   └── test/
 │   │       ├── ...                       # Plan 1 tests unchanged
-│   │       ├── test_omnivla_adapter.py   # NEW (CPU OK with synthetic checkpoint)
-│   │       └── test_omnivla_inference.py # NEW (CPU OK)
+│   │       └── test_omnivla_edge_adapter.py # NEW (CPU OK; shape + delta_to_pose math)
 │   └── raspicat_vla_bringup/
 │       └── launch/
 │           ├── mvp_local.launch.py       # Plan 1
@@ -332,8 +341,8 @@ git commit -m "feat(infra): add Dockerfile.omnivla for OmniVLA GPU serving"
 
 ```bash
 #!/usr/bin/env bash
-# Download OmniVLA checkpoints used by the cloud backbone (omnivla-original)
-# and the edge head (omnivla-edge) into ./omnivla-original/ and ./omnivla-edge/.
+# Download the OmniVLA cloud backbone (omnivla-original) into ./omnivla-original/.
+# Plan 2B v1 only needs this one repo; omnivla-edge is for a future Path-2 plan.
 #
 # Uses the host's ~/.cache/huggingface so repeat runs are instant.
 
@@ -341,25 +350,24 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ORIGINAL_DIR="${REPO_ROOT}/omnivla-original"
-EDGE_DIR="${REPO_ROOT}/omnivla-edge"
 
-mkdir -p "${ORIGINAL_DIR}" "${EDGE_DIR}"
+mkdir -p "${ORIGINAL_DIR}"
 
 python3 - <<PY
 import os
 from huggingface_hub import snapshot_download
 
-for repo, out in [
-    ("NHirose/omnivla-original", "${ORIGINAL_DIR}"),
-    ("NHirose/omnivla-edge",     "${EDGE_DIR}"),
-]:
-    p = snapshot_download(repo_id=repo, local_dir=out, local_dir_use_symlinks=False)
-    print(f"== {repo} -> {p}")
-    for root, _, files in os.walk(p):
-        for f in files:
-            full = os.path.join(root, f)
-            size_mb = os.path.getsize(full) / (1024 * 1024)
-            print(f"   {os.path.relpath(full, p)}  ({size_mb:.1f} MB)")
+p = snapshot_download(
+    repo_id="NHirose/omnivla-original",
+    local_dir="${ORIGINAL_DIR}",
+    local_dir_use_symlinks=False,
+)
+print(f"== NHirose/omnivla-original -> {p}")
+for root, _, files in os.walk(p):
+    for f in files:
+        full = os.path.join(root, f)
+        size_mb = os.path.getsize(full) / (1024 * 1024)
+        print(f"   {os.path.relpath(full, p)}  ({size_mb:.1f} MB)")
 PY
 ```
 
@@ -367,7 +375,7 @@ PY
 
 ```bash
 chmod +x scripts/download_omnivla_checkpoints.sh
-printf '\n# OmniVLA model weights (large; do not commit)\nomnivla-original/\nomnivla-edge/\n' >> .gitignore
+printf '\n# OmniVLA model weights (large; do not commit)\nomnivla-original/\n' >> .gitignore
 ```
 
 - [ ] **Step 2.3: Run the download once**
@@ -730,18 +738,20 @@ Key porting steps from `run_forward_pass`:
 1. Build batch via `omnivla_data_transform.build_inference_batch(...)`.
 2. Forward through `vla` with `torch.autocast('cuda', dtype=bfloat16)` + `torch.no_grad()`. Pass `proprio=batch['goal_pose']`, `proprio_projector=self.pose_projector`, `output_hidden_states=True`, `use_film=False`.
 3. Slice `actions_hidden_states` from `last_hidden_states` using `get_current_action_mask` + `get_next_actions_mask` from `prismatic.training.train_utils`.
-4. Reshape to `(1, NUM_ACTIONS_CHUNK * ACTION_DIM, hidden_dim)`. **OmniVLA-original returns this directly as the cloud → edge payload** (no separate `action_proj`).
-5. Cast to float32 numpy and return `(projected_actions, metrics)`.
+4. Run the action_head: `pred = self.action_head(actions_hidden_states.reshape(1, NUM_ACTIONS_CHUNK*ACTION_DIM, -1), ...)`. The L1RegressionActionHead returns `(B, NUM_ACTIONS_CHUNK, ACTION_DIM)` (typically (1, 8, 4)).
+5. Reshape to `(NUM_ACTIONS_CHUNK, ACTION_DIM)`, cast to float32 numpy, return `(action_chunk, metrics)`. **The cloud→edge payload IS the predicted action chunk** — no further projection.
 
-The actual constructor arguments for `ProprioProjector(llm_dim=vla.llm_dim, proprio_dim=POSE_DIM)` and `L1RegressionActionHead_idcat(input_dim=vla.llm_dim, hidden_dim=vla.llm_dim, action_dim=ACTION_DIM)` come straight from `run_omnivla_edge.py:393–410` — copy those values.
+The actual constructor arguments for `ProprioProjector(llm_dim=vla.llm_dim, proprio_dim=POSE_DIM)` and `L1RegressionActionHead_idcat(input_dim=vla.llm_dim, hidden_dim=vla.llm_dim, action_dim=ACTION_DIM)` come straight from `run_omnivla.py:530–552` — copy those values.
 
 `model_info()` returns:
 - `model_name='NHirose/omnivla-original'`
 - `model_version=f'omnivla-orig-step{resume_step}'`
-- `num_tokens=NUM_ACTIONS_CHUNK * ACTION_DIM` (typically 8 × 4 = 32)
-- `embed_dim=vla.llm_dim` (typically 4096; verify via Task 0)
+- `num_tokens=NUM_ACTIONS_CHUNK` (typically 8)
+- `embed_dim=ACTION_DIM` (typically 4 — (x, y, cos, sin))
 - `device=str(self.device)`
 - `ready=True`
+
+**Embedding-cache compatibility:** Plan 1's `EmbeddingCache` was sized for `embed_dim=1024`; verify in Task 6.5 that the (8, 4) payload round-trips correctly. The cache stores raw float32 arrays so dimensionality is irrelevant; the only risk is hard-coded shape assumptions in `proto_action_embedding_to_msg` or `_stub_adapter_to_path`. Both currently treat the embedding as opaque — should be safe.
 
 - [ ] **Step 6.3: Smoke test (slow, GPU-only, opt-in via `OMNIVLA_E2E=1`)**
 
@@ -794,97 +804,153 @@ git commit -m "feat(remote): add OmniVLABackend wired into VLAServer"
 
 ---
 
-## Task 7: Edge — load `OmniVLA_edge` model (TDD)
+## Task 7: Edge — `OmniVLAEdgeAdapter` (waypoint chunk → Path, no learned model)
 
 **Files:**
 - Create: `src/raspicat_vla_edge/raspicat_vla_edge/adapters/omnivla.py`
-- Create: `src/raspicat_vla_edge/test/test_omnivla_adapter.py`
+- Create: `src/raspicat_vla_edge/test/test_omnivla_edge_adapter.py`
 
-The `OmniVLA_edge` class lives at `external/OmniVLA/inference/model_omnivla_edge.py:84+`. It is **not** part of `prismatic`; it is its own file. Plan 2B's adapter wraps it.
+Path 1 puts no learned model on the edge. The cloud already ran the full OmniVLA-original pipeline and serialized `(NUM_ACTIONS_CHUNK, ACTION_DIM)` waypoints into the `ActionEmbedding`. The edge just builds a `nav_msgs/Path`. Per Task 0.4 / `model_omnivla_edge.py`, the waypoint format is `(x, y, cos(theta), sin(theta))` per step, with the first two dims optionally `cumsum`-ed; OmniVLA-original applies the cumsum on the cloud, so the edge consumes them as **absolute world-frame waypoints**.
 
-- [ ] **Step 7.1: Failing test (synthetic checkpoint)**
+- [ ] **Step 7.1: Failing test**
 
 ```python
-"""Tests for OmniVLAAdapter using a synthetic state_dict."""
-import torch, pytest
-from inference.model_omnivla_edge import OmniVLA_edge  # path adjusted by sys.path tweak in conftest
-from raspicat_vla_edge.adapters.omnivla import load_omnivla_edge
+"""Tests for OmniVLAEdgeAdapter — pure shape + path-building math, no model."""
+import numpy as np
+
+from raspicat_vla_edge.adapters.omnivla import OmniVLAEdgeAdapter
 
 
-def _save_random_checkpoint(tmp_path, step=750000):
-    model = OmniVLA_edge(...)  # constructor args TBD by Task 0.4
-    cp = tmp_path / f'edge_model--{step}_checkpoint.pt'
-    torch.save(model.state_dict(), cp)
-    return str(tmp_path)
+def test_predict_path_zero_waypoints_yields_origin_path():
+    adapter = OmniVLAEdgeAdapter(frame_id='base_link')
+    emb = np.zeros((8, 4), dtype=np.float32)
+    emb[..., 2] = 1.0  # cos(theta=0)
+    path = adapter.predict_path(
+        embedding=emb, embedding_shape=(1, 8, 4),
+        cur_image_rgb=None, past_image_rgb=None,
+    )
+    assert path.header.frame_id == 'base_link'
+    assert len(path.poses) == 8
+    for ps in path.poses:
+        assert ps.pose.position.x == 0.0
+        assert ps.pose.position.y == 0.0
 
 
-def test_load_omnivla_edge_returns_eval_module(tmp_path):
-    path = _save_random_checkpoint(tmp_path)
-    adapter = load_omnivla_edge(path=path, step=750000, device='cpu')
-    assert isinstance(adapter, OmniVLA_edge)
-    assert not adapter.training
+def test_predict_path_propagates_xy():
+    adapter = OmniVLAEdgeAdapter(frame_id='base_link')
+    emb = np.zeros((4, 4), dtype=np.float32)
+    emb[:, 0] = [0.1, 0.2, 0.3, 0.4]   # x at each step
+    emb[:, 2] = 1.0                     # cos(0)
+    path = adapter.predict_path(
+        embedding=emb, embedding_shape=(1, 4, 4),
+        cur_image_rgb=None, past_image_rgb=None,
+    )
+    xs = [ps.pose.position.x for ps in path.poses]
+    assert xs == [0.1, 0.2, 0.3, 0.4]
+
+
+def test_predict_path_preserves_orientation_cos_sin():
+    """The (cos, sin) packed into the last two dims should map to (z, w) of the
+    quaternion (yaw-only)."""
+    adapter = OmniVLAEdgeAdapter(frame_id='base_link')
+    import math
+    emb = np.zeros((1, 4), dtype=np.float32)
+    emb[0, :] = [1.0, 0.0, math.cos(math.pi/4), math.sin(math.pi/4)]
+    path = adapter.predict_path(
+        embedding=emb, embedding_shape=(1, 1, 4),
+        cur_image_rgb=None, past_image_rgb=None,
+    )
+    ps = path.poses[0]
+    assert ps.pose.position.x == 1.0
+    assert abs(ps.pose.orientation.w - math.cos(math.pi/4)) < 1e-6
+    assert abs(ps.pose.orientation.z - math.sin(math.pi/4)) < 1e-6
 ```
 
 - [ ] **Step 7.2: Implement `adapters/omnivla.py`**
 
-Key shape: `OmniVLA_edge.forward(obs_images, goal_pose, map_images, goal_image, modality_id_select, feat_text_lan, cur_large_img)` returns `(predicted_actions, distances, mask_number)`. Wrap into `OmniVLAAdapter(EdgeAdapter)` whose `predict_path(...)` consumes the embedding from gRPC, builds the missing inputs from cur/past images + zeros for `map_images`/`cur_large_img`, runs `forward`, and converts `predicted_actions` to `nav_msgs/Path`.
+```python
+"""OmniVLAEdgeAdapter: cloud→edge ActionEmbedding payload → nav_msgs/Path.
 
-- [ ] **Step 7.3: Tests pass**
+Path 1 of Plan 2B. The cloud ran OmniVLA-original and serialized
+predicted absolute waypoints with shape (NUM_ACTIONS_CHUNK, ACTION_DIM)
+where the last dim packs (x, y, cos(theta), sin(theta)). This adapter
+just builds a Path — no torch model on the edge.
+"""
+from __future__ import annotations
+
+from typing import Optional, Tuple
+
+import numpy as np
+from geometry_msgs.msg import PoseStamped
+from nav_msgs.msg import Path
+
+from .base import EdgeAdapter
+
+
+class OmniVLAEdgeAdapter(EdgeAdapter):
+    def __init__(self, *, frame_id: str = 'base_link') -> None:
+        self._frame_id = frame_id
+
+    def predict_path(
+        self,
+        *,
+        embedding: np.ndarray,
+        embedding_shape: Tuple[int, int, int],   # (B, num_tokens, embed_dim)
+        cur_image_rgb: Optional[np.ndarray] = None,
+        past_image_rgb: Optional[np.ndarray] = None,
+        frame_id: Optional[str] = None,
+    ) -> Path:
+        wp = np.asarray(embedding, dtype=np.float32).reshape(embedding_shape[1:])
+        if wp.shape[-1] < 4:
+            raise ValueError(
+                f'OmniVLA expects ACTION_DIM>=4 (x, y, cos, sin); got embed_dim={wp.shape[-1]}'
+            )
+        path = Path()
+        path.header.frame_id = frame_id or self._frame_id
+        for x, y, c, s in wp[:, :4]:
+            ps = PoseStamped()
+            ps.header.frame_id = path.header.frame_id
+            ps.pose.position.x = float(x)
+            ps.pose.position.y = float(y)
+            ps.pose.orientation.z = float(s)
+            ps.pose.orientation.w = float(c)
+            path.poses.append(ps)
+        return path
+```
+
+- [ ] **Step 7.3: Tests pass** (`pytest test/test_omnivla_edge_adapter.py -v`).
 
 - [ ] **Step 7.4: Commit**
 
 ```bash
 git add src/raspicat_vla_edge/raspicat_vla_edge/adapters/omnivla.py \
-        src/raspicat_vla_edge/test/test_omnivla_adapter.py
-git commit -m "feat(edge): add OmniVLA_edge loader (TDD)"
+        src/raspicat_vla_edge/test/test_omnivla_edge_adapter.py
+git commit -m "feat(edge): add OmniVLAEdgeAdapter (waypoint chunk -> Path, no learned model)"
 ```
 
 ---
 
-## Task 8: OmniVLA edge inference — embedding + (cur, past) → Path
-
-**Files:**
-- Create: `src/raspicat_vla_edge/raspicat_vla_edge/adapters/omnivla_inference.py`
-- Create: `src/raspicat_vla_edge/test/test_omnivla_inference.py`
-
-OmniVLA_edge already produces `predicted_actions` shape `(B, T, ACTION_DIM)` directly (delta-poses or absolute waypoints — to be confirmed in Task 0.4). Convert to `nav_msgs/Path`.
-
-- [ ] **Step 8.1: Test** — stub adapter returns `predicted_actions = torch.zeros(1, 8, 4)`; assert path shape and frame_id.
-
-- [ ] **Step 8.2: Implement** — port `delta_to_pose` from `external/OmniVLA/inference/run_omnivla_edge.py:92–135` (same math as AsyncVLA's `delta_to_pose`).
-
-- [ ] **Step 8.3: Wire into `OmniVLAAdapter.predict_path`** — call `forward` then `delta_to_pose` then build `Path`.
-
-- [ ] **Step 8.4: Tests pass**
-
-- [ ] **Step 8.5: Commit**
-
-```bash
-git commit -m "feat(edge): add omnivla_inference (forward + delta_to_pose -> Path)"
-```
-
----
-
-## Task 9: Wire `edge_node` to use `OmniVLAAdapter` via `adapter_kind: omnivla`
+## Task 8: Wire `edge_node` to use `OmniVLAEdgeAdapter` via `adapter_kind: omnivla`
 
 **Files:**
 - Modify: `src/raspicat_vla_edge/raspicat_vla_edge/edge_node.py`
 - Modify: `src/raspicat_vla_edge/config/edge_params.yaml`
 
-- [ ] **Step 9.1: Add params**
+- [ ] **Step 8.1: Add params**
 
 ```yaml
     adapter_kind: "stub"        # stub|asyncvla|omnivla
-    omnivla_edge_path: "/workspace/omnivla-edge"
-    omnivla_edge_step: 750000
-    edge_device: "cpu"
 ```
 
-- [ ] **Step 9.2: Modify `edge_node.py`** — extend the `adapter_kind` dispatch added in Task 3 with a branch for `omnivla` that constructs `OmniVLAAdapter(...)` from the params.
+(No `omnivla_edge_path` / `step` / `edge_device` — Path 1 has no learned model on the edge.)
 
-- [ ] **Step 9.3: Plan 1 smoke test must still pass with `adapter_kind=stub` (default)**
+- [ ] **Step 8.2: Modify `edge_node.py`** — extend the `adapter_kind` dispatch added in Task 3 with a branch for `omnivla` that constructs `OmniVLAEdgeAdapter(frame_id='base_link')` (parameterless beyond frame_id).
 
-- [ ] **Step 9.4: Commit**
+- [ ] **Step 8.3: Plan 1 smoke test must still pass with `adapter_kind=stub` (default)**
+
+- [ ] **Step 8.4: Edge-only smoke**: with `adapter_kind=omnivla` + the dummy server (which emits zeros), confirm a degenerate but well-formed Path is published. (The dummy uses `embed_dim=1024`, which Task 7 rejects; document this as expected — the dummy is not a valid OmniVLA-edge upstream. To make the dummy compatible, run with `--num-tokens 8 --embed-dim 4` and a custom `_embedding_for` that emits valid `(x,y,cos,sin)` rows.)
+
+- [ ] **Step 8.5: Commit**
 
 ```bash
 git commit -m "feat(edge): wire edge_node to support adapter_kind=omnivla"
@@ -892,18 +958,18 @@ git commit -m "feat(edge): wire edge_node to support adapter_kind=omnivla"
 
 ---
 
-## Task 10: `mvp_omnivla.launch.py` — full real-stack OmniVLA bringup
+## Task 9: `mvp_omnivla.launch.py` — full real-stack OmniVLA bringup
 
 **Files:**
 - Create: `src/raspicat_vla_bringup/launch/mvp_omnivla.launch.py`
 
 Mirrors `mvp_local.launch.py` but uses `--backend omnivla` and `adapter_kind:=omnivla`.
 
-- [ ] **Step 10.1: Implement** — same skeleton as Plan 2A's `mvp_real.launch.py`, swap:
+- [ ] **Step 9.1: Implement** — same skeleton as Plan 2A's `mvp_real.launch.py`, swap:
   - server cmd: `python3 -m raspicat_vla_remote.server_main --backend omnivla --vla-path /workspace/omnivla-original --port {grpc_port}`
-  - edge params: `adapter_kind: 'omnivla'`, `omnivla_edge_path: /workspace/omnivla-edge`
+  - edge params: `adapter_kind: 'omnivla'`
 
-- [ ] **Step 10.2: Commit**
+- [ ] **Step 9.2: Commit**
 
 ```bash
 git add src/raspicat_vla_bringup/launch/mvp_omnivla.launch.py
@@ -912,15 +978,15 @@ git commit -m "feat(bringup): add mvp_omnivla.launch.py"
 
 ---
 
-## Task 11: Real-stack manual smoke
+## Task 10: Real-stack manual smoke
 
 **Goal:** run the full OmniVLA stack (GPU host) with `tools/publish_fake_image.py` and confirm `/cmd_vel` is non-zero — proving OmniVLA produces a usable Path.
 
 This is a manual verification, not a pytest. Deliverable: a markdown note recording the run output.
 
-- [ ] **Step 11.1: Set up host** — Docker + NVIDIA Container Toolkit + `raspicat-vla-omnivla` image (Task 1) + `omnivla-original/` and `omnivla-edge/` populated (Task 2).
+- [ ] **Step 10.1: Set up host** — Docker + NVIDIA Container Toolkit + `raspicat-vla-omnivla` image (Task 1) + `omnivla-original/` populated (Task 2).
 
-- [ ] **Step 11.2: Run remote server in one terminal**
+- [ ] **Step 10.2: Run remote server in one terminal**
 
 ```bash
 DOCKER_CONFIG=/tmp/dckr-noauth docker run --rm --gpus all \
@@ -935,7 +1001,7 @@ DOCKER_CONFIG=/tmp/dckr-noauth docker run --rm --gpus all \
   "
 ```
 
-- [ ] **Step 11.3: Run edge + follower in a second terminal** (using Plan 1's `Dockerfile.test`, with the edge OmniVLA model loaded on CPU).
+- [ ] **Step 10.3: Run edge + follower in a second terminal** (using Plan 1's `Dockerfile.test` — pure CPU, no edge model).
 
 ```bash
 DOCKER_CONFIG=/tmp/dckr-noauth docker run --rm --user $(id -u):$(id -g) \
@@ -947,7 +1013,7 @@ DOCKER_CONFIG=/tmp/dckr-noauth docker run --rm --user $(id -u):$(id -g) \
   "
 ```
 
-- [ ] **Step 11.4: Publish fake images, observe topics**
+- [ ] **Step 10.4: Publish fake images, observe topics**
 
 ```bash
 ros2 topic echo /cmd_vel --once
@@ -956,13 +1022,13 @@ ros2 topic echo /raspicat_vla/status --once
 
 Expected: `linear.x` non-zero; `/raspicat_vla/status` reports `OK` after first inference completes.
 
-- [ ] **Step 11.5: Record results** in `docs/superpowers/notes/2026-04-30-omnivla-stack-smoke.md`:
+- [ ] **Step 10.5: Record results** in `docs/superpowers/notes/2026-04-30-omnivla-stack-smoke.md`:
 - Hardware (GPU model)
 - Inference latency (from `inference_ms` reported via `/raspicat_vla/embedding`)
 - Cmd values observed
 - Any errors / fallbacks (`STALE` / `WAITING_REMOTE` / `DEGRADED` durations)
 
-- [ ] **Step 11.6: Commit**
+- [ ] **Step 10.6: Commit**
 
 ```bash
 git add docs/superpowers/notes/2026-04-30-omnivla-stack-smoke.md
@@ -976,13 +1042,13 @@ git commit -m "docs(plan-2b): record OmniVLA real-stack smoke results"
 When all of the following are true, Plan 2B is complete:
 
 - [ ] `Dockerfile.omnivla` builds successfully on a GPU host.
-- [ ] `scripts/download_omnivla_checkpoints.sh` populates `omnivla-original/` and `omnivla-edge/`.
+- [ ] `scripts/download_omnivla_checkpoints.sh` populates `omnivla-original/`.
 - [ ] `colcon build` succeeds for all 5 packages.
 - [ ] All Plan 1 + Plan 2A pytest tests still pass (no regression).
-- [ ] New unit tests (`test_omnivla_data_transform.py`, `test_omnivla_adapter.py`, `test_omnivla_inference.py`) pass.
+- [ ] New unit tests (`test_omnivla_data_transform.py`, `test_omnivla_edge_adapter.py`) pass.
 - [ ] GPU smoke test (`test_omnivla_engine_smoke.py` with `OMNIVLA_E2E=1`) passes.
 - [ ] `mvp_omnivla.launch.py` brings up server + edge + follower without crash.
-- [ ] With `tools/publish_fake_image.py` running, `/cmd_vel` shows non-zero values driven by `OmniVLAAdapter` (not the stub).
+- [ ] With `tools/publish_fake_image.py` running, `/cmd_vel` shows non-zero values driven by the OmniVLA cloud (not the stub).
 - [ ] `/raspicat_vla/status` reports `OK` once the first embedding arrives.
 - [ ] `--backend dummy|asyncvla|omnivla` and `adapter_kind=stub|asyncvla|omnivla` all work; switching between them requires only config changes.
 
@@ -990,12 +1056,17 @@ When all of the following are true, Plan 2B is complete:
 
 ## Open questions
 
-These should be resolved during Task 0 investigation:
+Resolved by Task 0 (`docs/superpowers/notes/2026-04-30-omnivla-deps.md`):
 
-1. **Prismatic version conflict.** OmniVLA's `external/OmniVLA/prismatic` and AsyncVLA's `external/AsyncVLA/prismatic` are sibling vendored copies. Are they byte-identical? If not, can a single Docker image install both, or do we permanently keep two images (`raspicat-vla-asyncvla` + `raspicat-vla-omnivla`)?
-2. **`OmniVLA_edge` constructor signature.** Exact `__init__` args (channels, num_layers, etc.) — extract from `external/OmniVLA/inference/model_omnivla_edge.py` and the YAML config inside `omnivla-edge/`.
-3. **`OmniVLA_edge.forward` output semantics.** Is `predicted_actions` deltas (like AsyncVLA) or absolute waypoints? Drives whether `delta_to_pose` is needed.
-4. **`map_images` / `cur_large_img` / `satellite`.** Confirm the model accepts blank tensors of the right shape when those modalities aren't being used. If not, the proto needs extension before Plan 2B v1 can land.
+- Architectural mismatch — adopted Path 1.
+- Prismatic version conflict — keep two Docker images (`raspicat-vla-asyncvla`, `raspicat-vla-omnivla`) for now. Merging is a future cleanup.
+- `OmniVLA_edge` is **not used** in Plan 2B v1; deferred to a future Path-2 plan.
+
+Still open, to be answered during implementation:
+
+1. **L1RegressionActionHead output normalization.** OmniVLA-original normalizes by `ACTION_PROPRIO_NORMALIZATION_TYPE`. Verify the Path 1 edge consumes un-normalized waypoints (or de-normalize on the cloud before serializing).
+2. **Embedding-cache compatibility with `embed_dim=4`.** Inspect `EmbeddingCache` and `proto_action_embedding_to_msg` for any hard-coded shape assumption.
+3. **`L1RegressionDistHead`.** OmniVLA ships `dist_head--120000_checkpoint.pt`. Plan 2B v1 ignores it; consider exposing it later as `/raspicat_vla/distance_to_goal`.
 5. **Edge OmniVLA model size.** AsyncVLA's `Edge_adapter` is ~5M params; OmniVLA-edge is heavier (FiLM + multi-stage feature extractors). Does it fit on the raspicat (Pi 4 / Jetson Nano level) at acceptable latency? Benchmark in Task 11 — may need to push compute back to the cloud and revisit Plan 2B's edge/cloud split.
 6. **Checkpoint step number for `omnivla-edge`.** Task 0.3 will tell us. Default placeholder: `750000`.
 7. **`POSE_DIM` mismatch.** OmniVLA uses `POSE_DIM` from `prismatic.vla.constants`. Must match the value AsyncVLA uses if both backends share the same `pose_projector` interface.
@@ -1009,4 +1080,4 @@ When Plan 2A and Plan 2B are both done:
 1. **Plan 3** — sim integration (`sim_full.launch.py` with Gazebo + raspicat_sim) for both backends.
 2. **Plan 4** — closed-loop benchmarking (`tools/benchmark.py`): RTT, throughput, latency injection, AsyncVLA vs OmniVLA comparison on the same scenarios.
 3. **Plan 5** — real raspicat hardware launch + safety stop field tests.
-4. **Possible follow-up** — OmniVLA-original (monolithic, no edge split) as an additional `--backend omnivla-mono` that publishes `nav_msgs/Path` directly via a ROS2 server-side node, bypassing the gRPC stream entirely. Useful when the edge has zero compute headroom.
+4. **Possible follow-up: Path 2 (OmniVLA-edge fully on edge)** — load `OmniVLA_edge` + CLIP on the raspicat, accumulate a 6-frame ring buffer, zero-fill `map_images`, and run the whole edge pipeline locally. Add `adapter_kind=omnivla_edge_local` and a no-op cloud server. Pre-requisite: confirm raspicat compute headroom is sufficient for `OmniVLA_edge` + EfficientNet-b0 + CLIP-B/32 at the target action_rate_hz.
