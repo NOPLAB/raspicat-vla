@@ -1,0 +1,64 @@
+# Dockerfile for OmniVLA cloud-side gRPC server (Plan 2B Path 1).
+#
+# Hosts the OpenVLA-OFT backbone (omnivla-original) on a CUDA GPU.
+# Path 1 keeps no learned model on the edge, so this image only needs the
+# inference path of `prismatic` (vendored at external/OmniVLA), not the
+# training-time deps (tensorflow / lerobot / dlimp etc.).
+FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+SHELL ["/bin/bash", "-c"]
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3.10 python3.10-venv python3-pip \
+        git curl ca-certificates build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN ln -sf /usr/bin/python3.10 /usr/bin/python3 \
+    && ln -sf /usr/bin/python3 /usr/bin/python
+
+# Pin torch to the exact bf16 CUDA 12.1 wheels OmniVLA was trained against.
+RUN pip3 install --no-cache-dir \
+        'torch==2.2.0+cu121' 'torchvision==0.17.0+cu121' 'torchaudio==2.2.0+cu121' \
+        --extra-index-url https://download.pytorch.org/whl/cu121
+
+# Inference-only deps. transformers MUST be the openvla-oft fork
+# (bidirectional attention). numpy<2 keeps prismatic happy.
+RUN pip3 install --no-cache-dir \
+        'numpy==1.26.4' \
+        'huggingface_hub>=0.23' \
+        'accelerate>=0.30' \
+        'safetensors' \
+        'sentencepiece==0.1.99' \
+        'tokenizers==0.19.1' \
+        'timm==0.9.10' \
+        'peft==0.11.1' \
+        'einops' \
+        'Pillow' \
+        'opencv-python-headless' \
+        'utm' \
+        'PyYAML' \
+        'grpcio>=1.50' \
+        'grpcio-tools>=1.50' \
+        'protobuf>=4.21' \
+        'typing_extensions>=4.5' \
+    && pip3 install --no-cache-dir \
+        'transformers @ git+https://github.com/moojink/transformers-openvla-oft.git'
+
+# OPTIONAL: flash-attn. OpenVLAForActionPrediction_MMNv1 runs without it at
+# inference (PyTorch SDPA is the fallback). Build is slow + toolchain-sensitive,
+# so it is intentionally omitted from this image. Uncomment if benchmarks show
+# attention to be the bottleneck.
+# RUN pip3 install --no-cache-dir packaging ninja \
+#     && pip3 install --no-cache-dir 'flash-attn==2.5.5' --no-build-isolation
+
+# Vendor OmniVLA's `prismatic` package WITHOUT pulling its training-time deps
+# (tensorflow / dlimp / draccus / wandb / json-numpy / etc.). Inference only
+# touches the `prismatic.{models,extern,training.train_utils,vla,...}` import
+# subset which has no transitive train-only requirement.
+COPY external/OmniVLA /opt/OmniVLA
+RUN pip3 install --no-cache-dir --no-deps -e /opt/OmniVLA
+
+WORKDIR /workspace
