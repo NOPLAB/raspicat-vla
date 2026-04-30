@@ -23,3 +23,6 @@
 	path = external/raspicat_slam_navigation
 	url = https://github.com/rt-net/raspicat_slam_navigation.git
 	branch = ros2
+[submodule "external/MBRA"]
+	path = external/MBRA
+	url = https://github.com/NHirose/Learning-to-Drive-Anywhere-with-MBRA

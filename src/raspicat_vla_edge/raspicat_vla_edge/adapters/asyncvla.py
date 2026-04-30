@@ -96,9 +96,11 @@ class AsyncVLAEdgeAdapter(EdgeAdapter):
         resume_step: int = 750000,
         device: str = 'cpu',
         # Edge_adapter constructor knobs (from AsyncVLA's config_nav/dataset_config.yaml).
-        obs_encoding_size: int = 512,
-        mha_num_attention_heads: int = 2,
-        mha_num_attention_layers: int = 2,
+        # obs_encoding_size MUST match the cloud's Proj_Actiontokens output dim
+        # (action_dim=1024 in run_asyncvla.py:660); otherwise the decoder cat fails.
+        obs_encoding_size: int = 1024,
+        mha_num_attention_heads: int = 4,
+        mha_num_attention_layers: int = 4,
         mha_ff_dim_factor: int = 4,
     ) -> None:
         # Imports are deferred to keep edge-node startup fast when adapter_kind
