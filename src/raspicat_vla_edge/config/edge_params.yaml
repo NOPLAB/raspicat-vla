@@ -14,3 +14,4 @@ vla_edge_node:
     status_topic: "/raspicat_vla/status"
     embedding_debug_topic: "/raspicat_vla/embedding"
     publish_embedding_debug: true
+    adapter_kind: "stub"   # stub|asyncvla|omnivla

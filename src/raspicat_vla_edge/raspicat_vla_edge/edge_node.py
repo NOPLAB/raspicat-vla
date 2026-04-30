@@ -33,6 +33,21 @@ from raspicat_vla_proto.conversions import (
 from .preprocess import resize_and_jpeg
 from .embedding_cache import EmbeddingCache, CachedEmbedding
 from .grpc_client import VLAClient
+from .adapters.base import EdgeAdapter
+
+
+def _build_adapter(kind: str) -> EdgeAdapter:
+    """Construct the EdgeAdapter selected by the ``adapter_kind`` parameter."""
+    if kind == 'stub':
+        from .adapters.stub import StubAdapter
+        return StubAdapter()
+    if kind == 'omnivla':
+        from .adapters.omnivla import OmniVLAEdgeAdapter
+        return OmniVLAEdgeAdapter()
+    if kind == 'asyncvla':
+        from .adapters.asyncvla import AsyncVLAEdgeAdapter  # type: ignore[import-not-found]
+        return AsyncVLAEdgeAdapter()
+    raise ValueError(f'unknown adapter_kind: {kind!r} (choices: stub|asyncvla|omnivla)')
 
 
 def _ros_goal_to_proto(goal: GoalSpecMsg) -> raspicat_vla_pb2.GoalSpec:
@@ -59,26 +74,6 @@ def _ros_goal_to_proto(goal: GoalSpecMsg) -> raspicat_vla_pb2.GoalSpec:
     raise ValueError(f'unknown goal mode {goal.mode}')
 
 
-def _stub_adapter_to_path(
-    embedding: Optional[CachedEmbedding],
-    *,
-    n_pts: int = 10,
-    step_m: float = 0.1,
-    frame: str = 'base_link',
-) -> Path:
-    """Plan 1 stub: ignore embedding contents, emit straight-ahead path."""
-    path = Path()
-    path.header.frame_id = frame
-    for i in range(1, n_pts + 1):
-        ps = PoseStamped()
-        ps.header.frame_id = frame
-        ps.pose.position.x = i * step_m
-        ps.pose.position.y = 0.0
-        ps.pose.orientation.w = 1.0
-        path.poses.append(ps)
-    return path
-
-
 class VLAEdgeNode(LifecycleNode):
 
     def __init__(self) -> None:
@@ -91,6 +86,7 @@ class VLAEdgeNode(LifecycleNode):
         self._latest_goal_lock = threading.Lock()
         self._cache: Optional[EmbeddingCache] = None
         self._client: Optional[VLAClient] = None
+        self._adapter: Optional[EdgeAdapter] = None
         self._frame_counter = 0
         self._send_timer = None
         self._action_timer = None
@@ -118,6 +114,7 @@ class VLAEdgeNode(LifecycleNode):
         self.declare_parameter('status_topic', '/raspicat_vla/status')
         self.declare_parameter('embedding_debug_topic', '/raspicat_vla/embedding')
         self.declare_parameter('publish_embedding_debug', True)
+        self.declare_parameter('adapter_kind', 'stub')  # stub|asyncvla|omnivla
 
     # ------------------------------------------------------------- lifecycle
 
@@ -128,6 +125,9 @@ class VLAEdgeNode(LifecycleNode):
         hard = self.get_parameter('embedding_hard_timeout_sec').value
         self._cache = EmbeddingCache(max_age_sec=float(max_age), hard_timeout_sec=float(hard))
         self._client = VLAClient(address=addr, on_embedding=self._on_embedding_received)
+        adapter_kind = str(self.get_parameter('adapter_kind').value)
+        self._adapter = _build_adapter(adapter_kind)
+        self.get_logger().info(f'edge adapter_kind={adapter_kind!r}')
 
         image_topic = self.get_parameter('image_topic').value
         goal_topic = self.get_parameter('goal_topic').value
@@ -173,6 +173,7 @@ class VLAEdgeNode(LifecycleNode):
             self._client.stop()
         self._client = None
         self._cache = None
+        self._adapter = None
         # Destroy subscriptions and publishers so a subsequent configure
         # doesn't leak duplicates (lifecycle expects on_cleanup to invert
         # on_configure).
@@ -285,7 +286,7 @@ class VLAEdgeNode(LifecycleNode):
         follower outputs zero Twist (safe-stop). DEGRADED is treated as
         usable but logged.
         """
-        if self._cache is None or self._path_pub is None:
+        if self._cache is None or self._path_pub is None or self._adapter is None:
             return
         status = self._cache.status()
         path = Path()
@@ -301,7 +302,20 @@ class VLAEdgeNode(LifecycleNode):
             self.get_logger().warn('embedding age over max_age; running degraded')
 
         emb = self._cache.get_latest_raw()  # OK or DEGRADED
-        path = _stub_adapter_to_path(emb)
+        with self._latest_image_lock:
+            cur = None if self._latest_image is None else self._latest_image.copy()
+        try:
+            path = self._adapter.predict_path(
+                embedding=np.asarray(emb.embedding, dtype=np.float32),
+                embedding_shape=(1, int(emb.num_tokens), int(emb.embed_dim)),
+                cur_image_rgb=cur,
+                past_image_rgb=cur,
+                frame_id='base_link',
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.get_logger().warn(f'adapter.predict_path failed: {exc}; safe-stopping')
+            path = Path()
+            path.header.frame_id = 'base_link'
         path.header.stamp = self.get_clock().now().to_msg()
         self._path_pub.publish(path)
 
