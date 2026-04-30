@@ -35,15 +35,32 @@ class EmbeddingCache:
         self._hard_ns = int(hard_timeout_sec * 1e9)
         self._lock = threading.Lock()
         self._latest: Optional[CachedEmbedding] = None
+        # Frame-id floor: any put() with frame_id <= _floor is rejected.
+        # Set by invalidate(floor=...) when the goal changes so embeddings
+        # derived from in-flight observations of the OLD goal don't land in
+        # the cache. None means "no floor". The floor is sticky — it stays in
+        # place even after a put() succeeds; the existing monotonicity rule
+        # (frame_id > latest.frame_id) then keeps things consistent.
+        self._floor: Optional[int] = None
 
     def put(self, emb: CachedEmbedding) -> None:
         with self._lock:
+            if self._floor is not None and emb.frame_id <= self._floor:
+                return
             if self._latest is None or emb.frame_id > self._latest.frame_id:
                 self._latest = emb
 
-    def invalidate(self) -> None:
+    def invalidate(self, *, floor: Optional[int] = None) -> None:
+        """Drop the cached embedding.
+
+        If ``floor`` is given, also reject any future put() whose frame_id is
+        <= floor. Callers use this when the goal changes so embeddings from
+        observations sent under the previous goal can't sneak back in.
+        """
         with self._lock:
             self._latest = None
+            if floor is not None:
+                self._floor = floor
 
     def get_latest_raw(self) -> Optional[CachedEmbedding]:
         with self._lock:

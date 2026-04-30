@@ -211,7 +211,14 @@ class AsyncVLAEdgeNode(LifecycleNode):
         with self._latest_goal_lock:
             self._latest_goal = msg
         if self._cache is not None:
-            self._cache.invalidate()
+            # Read of _frame_counter is unlocked: _send_observation_tick (on
+            # another executor thread) increments without a lock. Worst-case
+            # we read one too low/high — both are tolerable: too low keeps a
+            # stale embedding for at most one tick, too high rejects one fresh
+            # embedding. Locking here would just trade a one-tick delay for a
+            # rare lock contention, so we accept the race for the MVP.
+            floor = self._frame_counter
+            self._cache.invalidate(floor=floor)
 
     # ------------------------------------------------------------ tick: send
 
@@ -329,5 +336,13 @@ def main() -> None:
     try:
         executor.spin()
     finally:
+        # If we exited spin() while the node was still active (no cleanup
+        # transition issued), the gRPC client thread is still alive. Stop it
+        # explicitly so the bidi stream is closed gracefully — otherwise the
+        # daemon thread is killed at interpreter exit and the server logs an
+        # aborted RPC. Mirrors what on_shutdown does and reaches into _client
+        # the same way (no public accessor exists).
+        if node._client is not None:
+            node._client.stop()
         node.destroy_node()
         rclpy.shutdown()
