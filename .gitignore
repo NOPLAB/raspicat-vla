@@ -27,3 +27,6 @@ src/raspicat_vla_proto/raspicat_vla_proto/raspicat_vla_pb2_grpc.py
 
 # OmniVLA model weights (large; do not commit)
 omnivla-original/
+
+# AsyncVLA model weights (large; do not commit)
+AsyncVLA_release/
