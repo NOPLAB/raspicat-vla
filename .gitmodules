@@ -4,3 +4,6 @@
 [submodule "external/raspicat-sim-docker"]
 	path = external/raspicat-sim-docker
 	url = https://github.com/CIT-Autonomous-Robot-Lab/raspicat-sim-docker
+[submodule "external/OmniVLA"]
+	path = external/OmniVLA
+	url = https://github.com/NHirose/OmniVLA
