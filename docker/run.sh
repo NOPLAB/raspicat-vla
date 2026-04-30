@@ -49,8 +49,11 @@ Commands:
   run MODEL MODE [OPTS]   Run a configuration
     MODEL = asyncvla | omnivla
     MODE:
-      --remote {--cpu|--gpu}        Host the cloud-side gRPC server here.
-                                    Uses Dockerfile.<MODEL>.
+      --remote {--cpu|--gpu} [--host BIND]
+                                    Host the cloud-side gRPC server here.
+                                    Uses Dockerfile.<MODEL>. BIND defaults to
+                                    0.0.0.0 (listen on all interfaces); use
+                                    127.0.0.1 to keep it localhost-only.
       --real --host HOST            Run the edge stack here, talking to a
                                     cloud server at HOST:$GRPC_PORT. Uses
                                     Dockerfile.real.
@@ -62,10 +65,12 @@ Commands:
 Examples:
   run.sh build asyncvla
   run.sh build --all
-  run.sh run asyncvla --remote --gpu
-  run.sh run omnivla --remote --cpu
+  run.sh run asyncvla --remote --gpu                       # bind 0.0.0.0
+  run.sh run asyncvla --remote --gpu --host 0.0.0.0
+  run.sh run asyncvla --remote --cpu --host 127.0.0.1      # localhost-only
+  run.sh run omnivla  --remote --cpu
   run.sh run asyncvla --real --host 192.168.1.2
-  run.sh run omnivla --sim --host 192.168.1.2
+  run.sh run omnivla  --sim  --host 192.168.1.2
 
 Environment overrides:
   GRPC_PORT     gRPC port (default 50051)
@@ -115,7 +120,7 @@ cmd_build() {
 }
 
 run_remote() {
-    local model=$1 device=$2
+    local model=$1 device=$2 bind_host=${3:-0.0.0.0}
     local image="${IMAGES[$model]}"
     local resume_step="${RESUME_STEP[$model]}"
     local weights="${WEIGHTS_DIR[$model]}"
@@ -125,7 +130,7 @@ run_remote() {
         device_arg="cuda:0"
     fi
 
-    log "${model} remote backend on ${device_arg}, port ${GRPC_PORT}"
+    log "${model} remote backend on ${device_arg}, bind ${bind_host}:${GRPC_PORT}"
     # shellcheck disable=SC2086
     docker run --rm $gpu_flag --network host \
         -v "$REPO_ROOT:/workspace" \
@@ -135,6 +140,7 @@ run_remote() {
             pip install -e src/raspicat_vla_proto src/raspicat_vla_remote >/dev/null 2>&1 || true
             exec python3 -m raspicat_vla_remote.server_main \
                 --backend ${model} \
+                --host ${bind_host} \
                 --port ${GRPC_PORT} \
                 --vla-path ${weights} \
                 --resume-step ${resume_step} \
@@ -220,7 +226,7 @@ cmd_run() {
             if [[ -z $device ]]; then
                 err "--remote requires --cpu or --gpu"; return 1
             fi
-            run_remote "$model" "$device"
+            run_remote "$model" "$device" "${host:-0.0.0.0}"
             ;;
         real)
             [[ -n $host ]] || { err "--real requires --host HOST"; return 1; }
