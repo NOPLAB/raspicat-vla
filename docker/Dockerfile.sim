@@ -86,9 +86,15 @@ RUN cd /opt/sim_ws \
 # heavy __init__ files so `from prismatic.models.small_head import Edge_adapter`
 # succeeds without pulling transformers / draccus / peft / etc.
 COPY external/AsyncVLA/prismatic      /opt/AsyncVLA/prismatic
+# Stub every prismatic.* __init__ file that imports training-time deps
+# (transformers / draccus / peft / etc.). Keep submodules' .py importable but
+# don't run their __init__ chains. This is enough for `from
+# prismatic.models.small_head import Edge_adapter` and `from
+# prismatic.vla.constants import ACTION_DIM` to succeed on a CPU-only image.
 RUN : > /opt/AsyncVLA/prismatic/__init__.py \
     && : > /opt/AsyncVLA/prismatic/models/__init__.py \
     && : > /opt/AsyncVLA/prismatic/conf/__init__.py \
+    && : > /opt/AsyncVLA/prismatic/vla/__init__.py \
     && chmod -R a+rX /opt/AsyncVLA
 
 COPY external/MBRA                    /opt/MBRA
