@@ -3,7 +3,8 @@
 # Bundles:
 #  - ROS2 Humble desktop-full (Gazebo Classic 11)
 #  - rt-net raspicat sim packages (raspicat_ros, raspicat_description,
-#    raspicat_sim, raspicat_slam_navigation), pre-built in /opt/sim_ws.
+#    raspicat_sim, raspicat_slam_navigation), fetched via vcstool from
+#    raspicat.repos and pre-built in /opt/sim_ws.
 #  - CPU torch 2.2 + efficientnet_pytorch + grpcio so the edge node can run
 #    AsyncVLA's Edge_adapter.
 #  - external/AsyncVLA prismatic source vendored at /opt/AsyncVLA/prismatic
@@ -34,6 +35,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python3-typing-extensions \
         python3-colcon-common-extensions \
         python3-rosdep \
+        python3-vcstool \
         ros-humble-cv-bridge \
         ros-humble-diagnostic-msgs \
         ros-humble-gazebo-ros-pkgs \
@@ -58,11 +60,12 @@ RUN pip3 install --no-cache-dir \
 
 # ---------------------------------------------- rt-net raspicat sim workspace
 # Build the rt-net packages once at image build time so Gazebo + raspicat sim
-# is ready out-of-the-box. Submodules live under external/ in the repo.
-COPY external/raspicat_ros            /opt/sim_ws/src/raspicat_ros
-COPY external/raspicat_description    /opt/sim_ws/src/raspicat_description
-COPY external/raspicat_sim            /opt/sim_ws/src/raspicat_sim
-COPY external/raspicat_slam_navigation /opt/sim_ws/src/raspicat_slam_navigation
+# is ready out-of-the-box. Sources are fetched from GitHub via vcstool using
+# the pinned commits in raspicat.repos.
+COPY raspicat.repos /tmp/raspicat.repos
+RUN mkdir -p /opt/sim_ws/src \
+    && vcs import /opt/sim_ws/src < /tmp/raspicat.repos \
+    && rm /tmp/raspicat.repos
 
 # Pre-fetch Gazebo models bundled with raspicat_sim so they're cached in the
 # image and offline runs work.

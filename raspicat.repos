@@ -1,0 +1,30 @@
+# raspicat.repos — vcstool manifest for rt-net's raspicat ROS2 source packages.
+#
+# These packages are not released to the official ROS distros, so we vendor
+# them from source. Use vcstool to fetch them into ./src:
+#
+#   vcs import src < raspicat.repos
+#
+# Then resolve their transitive ROS dependencies via rosdep:
+#
+#   rosdep install --from-paths src --ignore-src -r -y
+#
+# Versions are pinned to specific commits (matching the previous submodule
+# pins) for reproducibility. Bump them by editing `version:` below.
+repositories:
+  raspicat_ros:
+    type: git
+    url: https://github.com/rt-net/raspicat_ros.git
+    version: 0d5c8fba06a07720a0de8020b5e56695ffdcc846  # ros2 branch
+  raspicat_description:
+    type: git
+    url: https://github.com/rt-net/raspicat_description.git
+    version: 352e7e3fb8d65d71916c64c0bfc2cdd2bc0945e4  # ros2 branch
+  raspicat_sim:
+    type: git
+    url: https://github.com/rt-net/raspicat_sim.git
+    version: 03a9a15c826e7e108e940a8912480ecd6f38bb30  # ros2 branch
+  raspicat_slam_navigation:
+    type: git
+    url: https://github.com/rt-net/raspicat_slam_navigation.git
+    version: f8765efcdb1d8c3dbbe7f7006037433f44c7bb3e  # ros2 branch

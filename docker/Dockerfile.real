@@ -3,7 +3,8 @@
 # Bundles:
 #  - ROS2 Humble ros-base (no Gazebo; raspicat hardware doesn't need a GUI).
 #  - rt-net raspicat real-robot packages (raspicat_ros, raspicat_description,
-#    raspicat_slam_navigation), pre-built in /opt/real_ws.
+#    raspicat_slam_navigation), fetched via vcstool from raspicat.repos and
+#    pre-built in /opt/real_ws.
 #  - CPU torch 2.2 + efficientnet_pytorch + grpcio so the edge node can run
 #    AsyncVLA's Edge_adapter on the robot.
 #  - external/AsyncVLA prismatic source vendored at /opt/AsyncVLA/prismatic
@@ -33,6 +34,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python3-typing-extensions \
         python3-colcon-common-extensions \
         python3-rosdep \
+        python3-vcstool \
         ros-humble-cv-bridge \
         ros-humble-diagnostic-msgs \
         ros-humble-lifecycle-msgs \
@@ -58,11 +60,14 @@ RUN pip3 install --no-cache-dir \
 
 # --------------------------------------------- rt-net raspicat real workspace
 # Build the rt-net packages once at image build time so the robot launch
-# graph is ready out-of-the-box. NOTE: raspicat_sim is intentionally NOT
-# included here (Gazebo is not used on the hardware).
-COPY external/raspicat_ros            /opt/real_ws/src/raspicat_ros
-COPY external/raspicat_description    /opt/real_ws/src/raspicat_description
-COPY external/raspicat_slam_navigation /opt/real_ws/src/raspicat_slam_navigation
+# graph is ready out-of-the-box. Sources are fetched from GitHub via vcstool
+# using the pinned commits in raspicat.repos. raspicat_sim is then deleted
+# from the workspace because Gazebo is not used on the hardware (and pulling
+# it in would force ros-humble-gazebo-* into the image via rosdep).
+COPY raspicat.repos /tmp/raspicat.repos
+RUN mkdir -p /opt/real_ws/src \
+    && vcs import /opt/real_ws/src < /tmp/raspicat.repos \
+    && rm -rf /opt/real_ws/src/raspicat_sim /tmp/raspicat.repos
 
 RUN apt-get update \
     && rosdep update \

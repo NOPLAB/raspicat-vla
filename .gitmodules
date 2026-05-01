@@ -7,22 +7,6 @@
 [submodule "external/raspicat-sim-docker"]
 	path = external/raspicat-sim-docker
 	url = https://github.com/CIT-Autonomous-Robot-Lab/raspicat-sim-docker
-[submodule "external/raspicat_ros"]
-	path = external/raspicat_ros
-	url = https://github.com/rt-net/raspicat_ros.git
-	branch = ros2
-[submodule "external/raspicat_description"]
-	path = external/raspicat_description
-	url = https://github.com/rt-net/raspicat_description.git
-	branch = ros2
-[submodule "external/raspicat_sim"]
-	path = external/raspicat_sim
-	url = https://github.com/rt-net/raspicat_sim.git
-	branch = ros2
-[submodule "external/raspicat_slam_navigation"]
-	path = external/raspicat_slam_navigation
-	url = https://github.com/rt-net/raspicat_slam_navigation.git
-	branch = ros2
 [submodule "external/MBRA"]
 	path = external/MBRA
 	url = https://github.com/NHirose/Learning-to-Drive-Anywhere-with-MBRA

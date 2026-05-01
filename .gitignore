@@ -27,3 +27,9 @@ src/raspicat_vla_proto/raspicat_vla_proto/raspicat_vla_pb2_grpc.py
 
 # Downloaded model weights (large; do not commit)
 models/
+
+# vcstool-imported rt-net packages (managed by raspicat.repos; do not commit)
+src/raspicat_ros/
+src/raspicat_description/
+src/raspicat_sim/
+src/raspicat_slam_navigation/
