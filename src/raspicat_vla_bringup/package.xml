@@ -11,12 +11,18 @@
 
   <exec_depend>raspicat_vla_edge</exec_depend>
   <exec_depend>raspicat_vla_remote</exec_depend>
-  <exec_depend>raspicat</exec_depend>
-  <exec_depend>raspicat_bringup</exec_depend>
-  <exec_depend>raspicat_description</exec_depend>
-  <exec_depend>raspicat_gazebo</exec_depend>
-  <exec_depend>raspicat_navigation</exec_depend>
-  <exec_depend>raspicat_slam</exec_depend>
+
+  <!-- The rt-net raspicat sim/real packages (raspicat, raspicat_bringup,
+       raspicat_description, raspicat_gazebo, raspicat_navigation,
+       raspicat_slam) are required at runtime by the launch files in
+       launch/ but are NOT declared as exec_depend here on purpose:
+       colcon's CMake build task verifies every exec_depend resolves to an
+       installed package.sh under install/, which would force the rt-net
+       sources to be co-built with raspicat_vla_bringup even in CI / test
+       containers that only need the vla packages. The rt-net packages are
+       provided at runtime by the dedicated Docker images (Dockerfile.real
+       / Dockerfile.sim build them in /opt/real_ws / /opt/sim_ws) and
+       resolved by AMENT_PREFIX_PATH overlay. -->
 
   <export>
     <build_type>ament_cmake</build_type>
