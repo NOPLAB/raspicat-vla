@@ -60,30 +60,3 @@ source install/setup.bash
 
 To bump the pinned rt-net versions, edit `raspicat.repos` and re-run
 `vcs import src < raspicat.repos`.
-
-## Quick start (Plan-1 MVP)
-
-Bring up the dummy server, the edge lifecycle node, and the path follower in
-one launch file:
-
-```bash
-ros2 launch raspicat_vla_bringup mvp_local.launch.py
-```
-
-Inject a fake camera frame and goal so something flows through the pipeline:
-
-```bash
-python3 tools/publish_fake_image.py
-```
-
-## Roadmap
-
-| Plan   | Backend(s)              | Status      |
-| ------ | ----------------------- | ----------- |
-| 1      | dummy gRPC server       | done        |
-| 2A     | AsyncVLA real model     | in progress |
-| 2B     | OmniVLA real model      | planned     |
-
-The edge / proto / msgs / bringup packages are model-agnostic; switching
-backends is done by running a different remote server against the same
-`VLAService` interface.
