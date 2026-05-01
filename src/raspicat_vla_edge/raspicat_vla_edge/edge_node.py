@@ -51,7 +51,7 @@ def _build_adapter(kind: str, *, params: dict) -> EdgeAdapter:
     if kind == 'asyncvla':
         from .adapters.asyncvla import AsyncVLAEdgeAdapter
         return AsyncVLAEdgeAdapter(
-            weights_path=str(params.get('asyncvla_weights_path', '/workspace/AsyncVLA_release')),
+            weights_path=str(params.get('asyncvla_weights_path', '/workspace/models/AsyncVLA_release')),
             resume_step=int(params.get('asyncvla_resume_step', 750000)),
             device=str(params.get('asyncvla_device', 'cpu')),
         )
@@ -124,7 +124,7 @@ class VLAEdgeNode(LifecycleNode):
         self.declare_parameter('publish_embedding_debug', True)
         self.declare_parameter('adapter_kind', 'stub')  # stub|asyncvla|omnivla
         # AsyncVLA edge knobs (only used when adapter_kind='asyncvla').
-        self.declare_parameter('asyncvla_weights_path', '/workspace/AsyncVLA_release')
+        self.declare_parameter('asyncvla_weights_path', '/workspace/models/AsyncVLA_release')
         self.declare_parameter('asyncvla_resume_step', 750000)
         self.declare_parameter('asyncvla_device', 'cpu')
 

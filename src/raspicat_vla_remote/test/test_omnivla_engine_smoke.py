@@ -1,7 +1,7 @@
 """Slow GPU-only smoke test for OmniVLABackend.
 
 Skipped unless OMNIVLA_E2E=1. Run inside Dockerfile.omnivla with --gpus all
-and the omnivla-original/ directory mounted at /workspace/omnivla-original.
+and models/omnivla-original/ mounted at /workspace/models/omnivla-original.
 """
 import os
 
@@ -23,7 +23,7 @@ def test_omnivla_backend_returns_action_chunk_shape():
     from raspicat_vla_remote.backends.omnivla import OmniVLABackend
 
     backend = OmniVLABackend(
-        vla_path=os.environ.get('OMNIVLA_VLA_PATH', '/workspace/omnivla-original'),
+        vla_path=os.environ.get('OMNIVLA_VLA_PATH', '/workspace/models/omnivla-original'),
         resume_step=int(os.environ.get('OMNIVLA_RESUME_STEP', '120000')),
         device='cuda:0',
     )
@@ -55,7 +55,7 @@ def test_omnivla_backend_pose_only_modality_is_4():
     from raspicat_vla_remote.backends.omnivla import OmniVLABackend
 
     backend = OmniVLABackend(
-        vla_path=os.environ.get('OMNIVLA_VLA_PATH', '/workspace/omnivla-original'),
+        vla_path=os.environ.get('OMNIVLA_VLA_PATH', '/workspace/models/omnivla-original'),
         resume_step=int(os.environ.get('OMNIVLA_RESUME_STEP', '120000')),
         device='cuda:0',
     )

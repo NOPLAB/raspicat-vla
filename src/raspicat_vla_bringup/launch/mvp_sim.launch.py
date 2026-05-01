@@ -71,7 +71,7 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument('rviz', default_value='false'),
         DeclareLaunchArgument('asyncvla_weights_path',
-                              default_value='/workspace/AsyncVLA_release'),
+                              default_value='/workspace/models/AsyncVLA_release'),
         DeclareLaunchArgument('asyncvla_resume_step', default_value='750000'),
         DeclareLaunchArgument('asyncvla_device', default_value='cpu'),
         sim,

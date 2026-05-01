@@ -69,8 +69,8 @@ def main() -> None:
     parser.add_argument('--model-version', default='dummy-v1')
 
     # Real-model (asyncvla/omnivla) knobs.
-    parser.add_argument('--vla-path', default='/workspace/omnivla-original',
-                        help='checkpoint dir (omnivla: ./omnivla-original; asyncvla: ./AsyncVLA_release)')
+    parser.add_argument('--vla-path', default='/workspace/models/omnivla-original',
+                        help='checkpoint dir (omnivla: ./models/omnivla-original; asyncvla: ./models/AsyncVLA_release)')
     parser.add_argument('--resume-step', type=int, default=120000)
     parser.add_argument('--device', default='cuda:0')
 

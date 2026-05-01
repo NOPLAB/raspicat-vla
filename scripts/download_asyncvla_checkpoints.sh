@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Download the AsyncVLA cloud + edge release (NHirose/AsyncVLA_release) into
-# ./AsyncVLA_release/. Contains:
+# ./models/AsyncVLA_release/. Contains:
 #   - 4-shard OpenVLA-OFT backbone (model-{1..4}-of-4.safetensors, ~15 GB)
 #   - action_head--750000_checkpoint.pt
 #   - action_proj--750000_checkpoint.pt        (AsyncVLA-only; cloud projector)
@@ -13,7 +13,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OUT_DIR="${REPO_ROOT}/AsyncVLA_release"
+OUT_DIR="${REPO_ROOT}/models/AsyncVLA_release"
 
 mkdir -p "${OUT_DIR}"
 

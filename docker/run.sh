@@ -35,8 +35,8 @@ declare -A RESUME_STEP=(
     [omnivla]=120000
 )
 declare -A WEIGHTS_DIR=(
-    [asyncvla]="/workspace/AsyncVLA_release"
-    [omnivla]="/workspace/omnivla-original"
+    [asyncvla]="/workspace/models/AsyncVLA_release"
+    [omnivla]="/workspace/models/omnivla-original"
 )
 
 usage() {

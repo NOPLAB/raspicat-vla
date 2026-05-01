@@ -16,6 +16,6 @@ vla_edge_node:
     publish_embedding_debug: true
     adapter_kind: "stub"   # stub|asyncvla|omnivla
     # AsyncVLA-edge knobs (used when adapter_kind=asyncvla):
-    asyncvla_weights_path: "/workspace/AsyncVLA_release"
+    asyncvla_weights_path: "/workspace/models/AsyncVLA_release"
     asyncvla_resume_step: 750000
     asyncvla_device: "cpu"

@@ -80,7 +80,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument('grpc_port', default_value='50051'),
-        DeclareLaunchArgument('vla_path', default_value='/workspace/omnivla-original'),
+        DeclareLaunchArgument('vla_path', default_value='/workspace/models/omnivla-original'),
         DeclareLaunchArgument('resume_step', default_value='120000'),
         DeclareLaunchArgument('device', default_value='cuda:0'),
         omnivla_server,

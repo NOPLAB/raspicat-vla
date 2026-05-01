@@ -1,7 +1,7 @@
 """Slow GPU-only smoke test for AsyncVLABackend.
 
 Skipped unless ASYNCVLA_E2E=1. Run inside Dockerfile.asyncvla with --gpus all
-and the AsyncVLA_release/ directory mounted at /workspace/AsyncVLA_release.
+and models/AsyncVLA_release/ mounted at /workspace/models/AsyncVLA_release.
 Pre-requisite: external/MBRA submodule must be checked out so that
 prismatic.models.small_head.Proj_Actiontokens can import vint_train.
 """
@@ -25,7 +25,7 @@ def test_asyncvla_backend_returns_projection_shape():
     from raspicat_vla_remote.backends.asyncvla import AsyncVLABackend
 
     backend = AsyncVLABackend(
-        vla_path=os.environ.get('ASYNCVLA_VLA_PATH', '/workspace/AsyncVLA_release'),
+        vla_path=os.environ.get('ASYNCVLA_VLA_PATH', '/workspace/models/AsyncVLA_release'),
         resume_step=int(os.environ.get('ASYNCVLA_RESUME_STEP', '750000')),
         device='cuda:0',
     )

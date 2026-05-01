@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Download the OmniVLA cloud backbone (NHirose/omnivla-original) into
-# ./omnivla-original/. Plan 2B Path 1 only needs this one repo; omnivla-edge is
-# reserved for a future Path-2 plan.
+# ./models/omnivla-original/. Plan 2B Path 1 only needs this one repo;
+# omnivla-edge is reserved for a future Path-2 plan.
 #
 # Uses the host's ~/.cache/huggingface so repeat runs are instant.
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OUT_DIR="${REPO_ROOT}/omnivla-original"
+OUT_DIR="${REPO_ROOT}/models/omnivla-original"
 
 mkdir -p "${OUT_DIR}"
 
