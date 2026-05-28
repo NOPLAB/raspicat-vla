@@ -158,13 +158,16 @@ run_remote() {
     fi
 
     log "${model} remote backend on ${device_arg}, bind ${bind_host}:${bind_port}"
+    # The raspicat_vla_proto/raspicat_vla_remote packages are ROS2 ament_python
+    # layouts (setup.cfg uses `script_dir`), so `pip install -e` fails on modern
+    # setuptools. Run from source via PYTHONPATH instead.
     # shellcheck disable=SC2086
     docker run --rm $gpu_flag --network host \
         -v "$REPO_ROOT:/workspace" \
         -v "$HF_CACHE_DIR:/root/.cache/huggingface" \
         "$image" bash -lc "
             cd /workspace
-            pip install -e src/raspicat_vla_proto src/raspicat_vla_remote >/dev/null 2>&1 || true
+            export PYTHONPATH=/workspace/src/raspicat_vla_proto:/workspace/src/raspicat_vla_remote\${PYTHONPATH:+:\$PYTHONPATH}
             exec python3 -m raspicat_vla_remote.server_main \
                 --backend ${model} \
                 --host ${bind_host} \

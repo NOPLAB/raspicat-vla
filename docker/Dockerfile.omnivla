@@ -55,10 +55,19 @@ RUN pip3 install --no-cache-dir \
 #     && pip3 install --no-cache-dir 'flash-attn==2.5.5' --no-build-isolation
 
 # Vendor OmniVLA's `prismatic` package WITHOUT pulling its training-time deps
-# (tensorflow / dlimp / draccus / wandb / json-numpy / etc.). Inference only
-# touches the `prismatic.{models,extern,training.train_utils,vla,...}` import
-# subset which has no transitive train-only requirement.
+# (tensorflow / dlimp / draccus / wandb / json-numpy / etc.). Several `__init__.py`
+# files re-export training-only modules; we blank those so submodule imports the
+# inference path actually uses (prismatic.extern.hf, prismatic.models.{action_heads,
+# projectors,backbones.llm.prompting}, prismatic.vla.{action_tokenizer,constants})
+# don't transitively pull missing deps. Reach the package via PYTHONPATH; the
+# upstream pyproject.toml's PEP 621 metadata isn't compatible with the system
+# pip's setuptools build, so a proper pip install yields an `UNKNOWN` package.
 COPY external/OmniVLA /opt/OmniVLA
-RUN pip3 install --no-cache-dir --no-deps -e /opt/OmniVLA
+RUN : > /opt/OmniVLA/prismatic/__init__.py \
+    && : > /opt/OmniVLA/prismatic/models/__init__.py \
+    && : > /opt/OmniVLA/prismatic/vla/__init__.py \
+    && : > /opt/OmniVLA/prismatic/models/backbones/llm/__init__.py \
+    && : > /opt/OmniVLA/prismatic/training/__init__.py
+ENV PYTHONPATH=/opt/OmniVLA
 
 WORKDIR /workspace

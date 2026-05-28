@@ -3,8 +3,6 @@ from __future__ import annotations
 
 import numpy as np
 
-from raspicat_vla_msgs.msg import ActionEmbedding as ActionEmbeddingMsg
-
 from . import raspicat_vla_pb2
 
 
@@ -24,8 +22,14 @@ def fp16_bytes_to_float32_list(raw: bytes) -> list[float]:
 
 def proto_action_embedding_to_msg(
     proto: raspicat_vla_pb2.ActionEmbedding,
-) -> ActionEmbeddingMsg:
-    """Convert a proto ActionEmbedding into the ROS2 message form."""
+):
+    """Convert a proto ActionEmbedding into the ROS2 message form.
+
+    The ``raspicat_vla_msgs`` import is lazy so this module stays importable
+    on cloud-only hosts (no ROS2 install).
+    """
+    from raspicat_vla_msgs.msg import ActionEmbedding as ActionEmbeddingMsg
+
     msg = ActionEmbeddingMsg()
     msg.frame_id = proto.frame_id
     msg.num_tokens = proto.num_tokens

@@ -93,3 +93,7 @@ def main() -> None:
     signal.signal(signal.SIGTERM, _sigterm)
     signal.signal(signal.SIGINT, _sigterm)
     server.wait_for_termination()
+
+
+if __name__ == '__main__':
+    main()
