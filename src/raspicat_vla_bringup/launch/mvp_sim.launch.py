@@ -18,7 +18,12 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import (
+    DeclareLaunchArgument,
+    ExecuteProcess,
+    IncludeLaunchDescription,
+    TimerAction,
+)
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 
@@ -62,6 +67,31 @@ def generate_launch_description():
         }.items(),
     )
 
+    # rt-net's spawn_raspicat.launch.py calls spawn_entity.py with its
+    # built-in 30s service-wait timeout. Under WSL2 / CPU contention the
+    # gazebo_ros_factory plugin can take longer than that to register, so
+    # the original spawn dies and the world stays empty. Schedule a
+    # fallback respawn at 90s with --timeout 120; if the first attempt
+    # already succeeded, this one returns harmlessly because raspicat is
+    # already in the world.
+    respawn_fallback = TimerAction(
+        period=90.0,
+        actions=[
+            ExecuteProcess(
+                cmd=[
+                    'bash', '-lc',
+                    'ros2 service call /gazebo/get_model_list '
+                    'gazebo_msgs/srv/GetModelList "{}" 2>/dev/null '
+                    '| grep -q raspicat || '
+                    'ros2 run gazebo_ros spawn_entity.py '
+                    '-entity raspicat -topic /robot_description '
+                    '-x 0.0 -y 0.0 -z 0.0 --timeout 120',
+                ],
+                output='screen',
+            ),
+        ],
+    )
+
     return LaunchDescription([
         DeclareLaunchArgument('remote_address', default_value='localhost:50051'),
         DeclareLaunchArgument('adapter_kind', default_value='omnivla'),
@@ -76,4 +106,5 @@ def generate_launch_description():
         DeclareLaunchArgument('asyncvla_device', default_value='cpu'),
         sim,
         edge,
+        respawn_fallback,
     ])
