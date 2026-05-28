@@ -156,7 +156,7 @@ class OmniVLABackend(VLABackend):
             action_dim=self._action_dim,
         )
 
-        with torch.autocast('cuda', dtype=self._dtype):
+        with torch.autocast(self._device.type, dtype=self._dtype):
             output = self._vla(
                 input_ids=batch['input_ids'].to(self._device),
                 attention_mask=batch['attention_mask'].to(self._device),
