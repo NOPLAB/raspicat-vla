@@ -152,14 +152,17 @@ def build_inference_batch(
     labels_b = labels_b[:, :model_max]
     attention_mask = input_ids_b.ne(pad_id)
 
+    # OmniVLA's vision_backbone is configured with num_images_in_input=2 and
+    # always splits pixel_values into [6, 6] along the channel dim, regardless
+    # of modality. When the caller has no goal image (pose- or lang-only goal),
+    # we pad the goal slot with zeros; the modality_id tells the model to
+    # ignore those features.
+    current_stack = torch.stack([pixel_values_current])
     if pixel_values_goal is not None:
-        # OmniVLA-original concatenates along channel dim (matches collator_custom).
-        pixel_values = torch.cat(
-            (torch.stack([pixel_values_current]), torch.stack([pixel_values_goal])),
-            dim=1,
-        )
+        goal_stack = torch.stack([pixel_values_goal])
     else:
-        pixel_values = torch.stack([pixel_values_current])
+        goal_stack = torch.zeros_like(current_stack)
+    pixel_values = torch.cat((current_stack, goal_stack), dim=1)
 
     goal_pose = torch.from_numpy(
         _goal_pose_cos_sin(goal_pose_xy_theta, pose_dim=pose_dim)
